@@ -1,82 +1,114 @@
-a = read pin 22 (Sensor 1)
-b = read pin 24 (Sensor 2)  
-c = read pin 26 (Sensor 3)
-```
+// Pin definitions
+const int pin22 = 22; //Sensor 1
+const int pin24 = 24; //Sensor 2
+const int pin26 = 26; //Sensor 3
+const int pin4 = 4;   //Motor Output
 
-### **Step 2: Check if Any Sensor Changed**
-```
-IF any sensor is different from last reading:
-    → Log the change to Serial (timestamp + all sensor states)
-    → Update the "last reading" values
-```
+// Run-off timing
+const unsigned long RUN_OFF_TIME = 5000; // 5 seconds run-off (adjust as needed)
+unsigned long runOffStartTime = 0;
+bool inRunOff = false;
 
-### **Step 3: Are We in Run-Off Mode?**
+// Sensor state tracking for logging
+int lastA = -1;
+int lastB = -1;
+int lastC = -1;
 
-**IF YES (motor is clearing sand):**
-- Check if 5 seconds have passed
-  - **If 5 seconds done**: Turn motor OFF, exit run-off mode
-  - **If still running**: Keep motor ON, skip the rest, go back to Step 1
+void setup() {
+  // Set up input pins
+  pinMode(pin22, INPUT); 
+  pinMode(pin24, INPUT);
+  pinMode(pin26, INPUT);
+  
+  // Set up output pin
+  pinMode(pin4, OUTPUT);
+  
+  // Initialize outputs
+  digitalWrite(pin4, HIGH);
+  
+  Serial.begin(115200);
+  Serial.println("=== System Started ===");
+  Serial.println("Time(ms), Sensor1, Sensor2, Sensor3, Motor, Event");
+}
 
-**IF NO:** Continue to Step 4...
+void loop() {
+  // Read sensor states
+  int a = digitalRead(pin22);
+  int b = digitalRead(pin24);
+  int c = digitalRead(pin26);
+  
+  // Log sensor changes
+  if (a != lastA || b != lastB || c != lastC) {
+    logSensorChange(a, b, c, "Sensor change");
+    lastA = a;
+    lastB = b;
+    lastC = c;
+  }
+  
+  // Handle run-off mode
+  if (inRunOff) {
+    if (millis() - runOffStartTime >= RUN_OFF_TIME) {
+      // Run-off complete
+      digitalWrite(pin4, LOW);
+      inRunOff = false;
+      logMotorState("Run-off complete - Motor OFF");
+    } else {
+      // Still in run-off, keep motor running
+      digitalWrite(pin4, HIGH);
+    }
+    delay(100);
+    return; // Skip normal logic during run-off
+  }
+  
+  // Normal operation logic
+  if (a == LOW && b == LOW) {
+    // Start run-off period
+    if (digitalRead(pin4) == HIGH) { // Only start if motor was running
+      inRunOff = true;
+      runOffStartTime = millis();
+      logMotorState("Both sensors LOW - Starting run-off");
+    }
+  }
+  else if (c == HIGH) {
+    // Emergency stop - start run-off
+    if (digitalRead(pin4) == HIGH) {
+      inRunOff = true;
+      runOffStartTime = millis();
+      logMotorState("Sensor 3 HIGH - Starting run-off");
+    }
+  }
+  else {
+    // Normal operation
+    digitalWrite(pin4, HIGH);
+  }
+  
+  delay(100);
+}
 
-### **Step 4: Check Stop Conditions**
+void logSensorChange(int a, int b, int c, String event) {
+  Serial.print(millis());
+  Serial.print(", ");
+  Serial.print(a == HIGH ? "HIGH" : "LOW");
+  Serial.print(", ");
+  Serial.print(b == HIGH ? "HIGH" : "LOW");
+  Serial.print(", ");
+  Serial.print(c == HIGH ? "HIGH" : "LOW");
+  Serial.print(", ");
+  Serial.print(digitalRead(pin4) == HIGH ? "ON" : "OFF");
+  Serial.print(", ");
+  Serial.println(event);
+}
 
-**Condition A: Both Sensor 1 AND Sensor 2 are LOW**
-```
-IF (a == LOW AND b == LOW):
-    IF motor is currently ON:
-        → Start run-off timer (5 seconds)
-        → Log "Starting run-off"
-        → Motor stays ON for now
-```
-
-**Condition B: Sensor 3 is HIGH (Emergency)**
-```
-ELSE IF (c == HIGH):
-    IF motor is currently ON:
-        → Start run-off timer (5 seconds)
-        → Log "Emergency - Starting run-off"
-        → Motor stays ON for now
-```
-
-**Condition C: Normal Operation**
-```
-ELSE (none of the stop conditions):
-    → Keep motor ON (or turn it back ON)
-```
-
-### **Step 5: Wait 100ms and Repeat**
-
----
-
-## **EXAMPLE SCENARIOS:**
-
-### **Scenario 1: Normal Running**
-```
-Sensors: a=HIGH, b=HIGH, c=LOW
-→ Motor: ON
-→ Keep running normally
-```
-
-### **Scenario 2: Both Sensors Detect "Empty"**
-```
-1. a goes LOW, b goes LOW
-2. Log: "Both sensors LOW - Starting run-off"
-3. Motor stays ON for 5 more seconds (clearing sand)
-4. After 5 seconds → Motor turns OFF
-5. Log: "Run-off complete - Motor OFF"
-```
-
-### **Scenario 3: Sensor Detect to much sand in hopper**
-```
-1. c goes HIGH
-2. Log: "Sensor 3 HIGH - Starting run-off"
-3. Motor stays ON for 5 seconds (clearing sand)
-4. After 5 seconds → Motor turns OFF
-```
-
-### **Scenario 4: System Recovers**
-```
-1. During run-off, sensors go back to normal (a=HIGH or b=HIGH, c=LOW)
-2. Run-off completes → Motor turns OFF
-3. Next loop: Condition C triggers → Motor turns back ON
+void logMotorState(String message) {
+  Serial.print(millis());
+  Serial.print(", ");
+  Serial.print(lastA == HIGH ? "HIGH" : "LOW");
+  Serial.print(", ");
+  Serial.print(lastB == HIGH ? "HIGH" : "LOW");
+  Serial.print(", ");
+  Serial.print(lastC == HIGH ? "HIGH" : "LOW");
+  Serial.print(", ");
+  Serial.print(digitalRead(pin4) == HIGH ? "ON" : "OFF");
+  Serial.print(", ");
+  Serial.println(message);
+}
