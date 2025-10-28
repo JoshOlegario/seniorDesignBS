@@ -4,6 +4,13 @@ const int pin24 = 24; //Sensor 2
 const int pin26 = 26; //Sensor 3
 const int pin4 = 4;   //Motor Output
 
+//Timer definitions
+int T;
+int StartTime;
+int RunTime;
+RunTime = 0;
+int MassFlowTimer;
+
 // Run-off timing
 const unsigned long RUN_OFF_TIME = 5000; // 5 seconds run-off (adjust as needed)
 unsigned long runOffStartTime = 0;
@@ -32,6 +39,10 @@ void setup() {
 }
 
 void loop() {
+   StartTime = milis();
+   T = 1;
+
+while ( T = 1) {
   // Read sensor states
   int a = digitalRead(pin22);
   int b = digitalRead(pin24);
@@ -52,6 +63,9 @@ void loop() {
       digitalWrite(pin4, LOW);
       inRunOff = false;
       logMotorState("Run-off complete - Motor OFF");
+      RunTime = RunTime + (milis() - StartTime); 
+      MassFlowTimer = milis() - StartTime;
+      T = 0;
     } else {
       // Still in run-off, keep motor running
       digitalWrite(pin4, HIGH);
@@ -84,6 +98,7 @@ void loop() {
   
   delay(100);
 }
+  }
 
 void logSensorChange(int a, int b, int c, String event) {
   Serial.print(millis());
