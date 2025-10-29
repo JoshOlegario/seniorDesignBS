@@ -1,129 +1,339 @@
-// Pin definitions
-const int pin22 = 22; //Sensor 1
-const int pin24 = 24; //Sensor 2
-const int pin26 = 26; //Sensor 3
-const int pin4 = 4;   //Motor Output
+#include <SPI.h>
+#include <SD.h>
+#include <Keypad.h>
 
-//Timer definitions
+// ========== PIN ASSIGNMENTS FOR VS1053 MUSIC MAKER ==========
+// Sensors
+const int SENSOR_1 = 22;
+const int SENSOR_2 = 24;
+const int SENSOR_3 = 26;
+
+// Motors
+const int MOTOR_1 = 30;
+const int MOTOR_2 = 31;
+
+// SD Card (VS1053 Music Maker specific)
+const int SD_CS = 4;     // SD Card Chip Select (REQUIRED for Music Maker)
+// MOSI = 11 (hardwired SPI)
+// MISO = 12 (hardwired SPI)
+// SCK = 13 (hardwired SPI)
+
+// VS1053 pins (not used in this code, but listed for reference)
+// const int VS1053_CS = 7;    // VS1053 chip select (we're not using audio)
+// const int VS1053_DCS = 6;   // VS1053 data select (we're not using audio)
+// const int VS1053_DREQ = 3;  // VS1053 data request (we're not using audio)
+
+// Keypad Matrix (adjusted to avoid pin 4)
+byte rowPins[4] = {2, 3, 5, 6};      // Row pins (skipped pin 4)
+byte colPins[3] = {7, 8, 9};         // Column pins
+// ============================================================
+
+// Keypad layout
+const byte ROWS = 4;
+const byte COLS = 3;
+char keys[ROWS][COLS] = {
+  {'1','2','3'},
+  {'4','5','6'},
+  {'7','8','9'},
+  {'*','0','#'}
+};
+
+Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
+
+// Timer definitions
 int T;
-int StartTime;
-int RunTime;
-RunTime = 0;
-int MassFlowTimer;
+unsigned long StartTime;
+unsigned long RunTime = 0;
+unsigned long MassFlowTimer;
 
 // Run-off timing
-const unsigned long RUN_OFF_TIME = 5000; // 5 seconds run-off (adjust as needed)
+const unsigned long RUN_OFF_TIME = 5000; // 5 seconds run-off
 unsigned long runOffStartTime = 0;
 bool inRunOff = false;
+
+// Manual mode states
+enum ManualState {
+  AUTO_MODE,
+  MANUAL_GO,
+  MANUAL_STOP
+};
+ManualState currentMode = AUTO_MODE;
 
 // Sensor state tracking for logging
 int lastA = -1;
 int lastB = -1;
 int lastC = -1;
 
+// SD Card
+File dataFile;
+String currentFileName;
+bool sdCardReady = false;
+
 void setup() {
   // Set up input pins
-  pinMode(pin22, INPUT); 
-  pinMode(pin24, INPUT);
-  pinMode(pin26, INPUT);
+  pinMode(SENSOR_1, INPUT); 
+  pinMode(SENSOR_2, INPUT);
+  pinMode(SENSOR_3, INPUT);
   
-  // Set up output pin
-  pinMode(pin4, OUTPUT);
+  // Set up output pins
+  pinMode(MOTOR_1, OUTPUT);
+  pinMode(MOTOR_2, OUTPUT);
   
   // Initialize outputs
-  digitalWrite(pin4, HIGH);
+  digitalWrite(MOTOR_1, HIGH);
+  digitalWrite(MOTOR_2, HIGH);
   
   Serial.begin(115200);
+  delay(1000); // Give serial time to initialize
+  
   Serial.println("=== System Started ===");
-  Serial.println("Time(ms), Sensor1, Sensor2, Sensor3, Motor, Event");
+  Serial.println("VS1053 Music Maker with SD Card Logging");
+  Serial.println("\n--- PIN CONFIGURATION ---");
+  Serial.println("Sensors: 22, 24, 26");
+  Serial.println("Motors: 30, 31");
+  Serial.println("SD Card CS: 4 (VS1053 Music Maker)");
+  Serial.println("Keypad Rows: 2, 3, 5, 6");
+  Serial.println("Keypad Cols: 7, 8, 9");
+  Serial.println("\n--- KEYPAD CONTROLS ---");
+  Serial.println("  1 = Emergency GO (Manual ON)");
+  Serial.println("  2 = Emergency STOP (Manual OFF)");
+  Serial.println("  3 = Return to Automatic Mode");
+  Serial.println("-------------------------\n");
+  
+  // Initialize SD card
+  Serial.println("Initializing SD card...");
+  if (!SD.begin(SD_CS)) {
+    Serial.println("ERROR: SD card initialization failed!");
+    Serial.println("Check: 1) SD card inserted? 2) Correct wiring? 3) Card formatted?");
+    sdCardReady = false;
+  } else {
+    Serial.println("SD card initialized successfully!");
+    sdCardReady = true;
+    
+    // Create new log file
+    currentFileName = getNextFileName();
+    
+    // Write CSV header
+    dataFile = SD.open(currentFileName, FILE_WRITE);
+    if (dataFile) {
+      dataFile.println("Time(ms),Sensor1,Sensor2,Sensor3,Motor1,Motor2,Mode,Event");
+      dataFile.close();
+      Serial.print("Created log file: ");
+      Serial.println(currentFileName);
+    } else {
+      Serial.println("ERROR: Could not create log file");
+      sdCardReady = false;
+    }
+  }
+  
+  Serial.println("\n=== LOGGING STARTED ===");
+  Serial.println("Time(ms),Sensor1,Sensor2,Sensor3,Motor1,Motor2,Mode,Event");
 }
 
 void loop() {
-   StartTime = milis();
-   T = 1;
-
-while ( T = 1) {
-  // Read sensor states
-  int a = digitalRead(pin22);
-  int b = digitalRead(pin24);
-  int c = digitalRead(pin26);
+  StartTime = millis();
+  T = 1;
   
-  // Log sensor changes
-  if (a != lastA || b != lastB || c != lastC) {
-    logSensorChange(a, b, c, "Sensor change");
-    lastA = a;
-    lastB = b;
-    lastC = c;
-  }
-  
-  // Handle run-off mode
-  if (inRunOff) {
-    if (millis() - runOffStartTime >= RUN_OFF_TIME) {
-      // Run-off complete
-      digitalWrite(pin4, LOW);
-      inRunOff = false;
-      logMotorState("Run-off complete - Motor OFF");
-      RunTime = RunTime + (milis() - StartTime); 
-      MassFlowTimer = milis() - StartTime;
-      T = 0;
-    } else {
-      // Still in run-off, keep motor running
-      digitalWrite(pin4, HIGH);
+  while (T == 1) {
+    // Check for keypad input
+    char key = keypad.getKey();
+    
+    if (key) {
+      handleKeypadInput(key);
     }
+    
+    // Read sensor states
+    int a = digitalRead(SENSOR_1);
+    int b = digitalRead(SENSOR_2);
+    int c = digitalRead(SENSOR_3);
+    
+    // ===== MANUAL MODE LOGIC =====
+    if (currentMode == MANUAL_GO) {
+      // Manual GO: Motors forced ON
+      digitalWrite(MOTOR_1, HIGH);
+      digitalWrite(MOTOR_2, HIGH);
+      
+      // Log sensor changes but don't act on them
+      if (a != lastA || b != lastB || c != lastC) {
+        logEvent(a, b, c, "Sensor change (Manual GO - Ignored)");
+        lastA = a;
+        lastB = b;
+        lastC = c;
+      }
+      
+      delay(100);
+      continue; // Skip automatic logic
+    }
+    
+    if (currentMode == MANUAL_STOP) {
+      // Manual STOP: Motors forced OFF
+      digitalWrite(MOTOR_1, LOW);
+      digitalWrite(MOTOR_2, LOW);
+      
+      // Log sensor changes but don't act on them
+      if (a != lastA || b != lastB || c != lastC) {
+        logEvent(a, b, c, "Sensor change (Manual STOP - Ignored)");
+        lastA = a;
+        lastB = b;
+        lastC = c;
+      }
+      
+      delay(100);
+      continue; // Skip automatic logic
+    }
+    
+    // ===== AUTOMATIC MODE LOGIC =====
+    
+    // Log sensor changes
+    if (a != lastA || b != lastB || c != lastC) {
+      logEvent(a, b, c, "Sensor change");
+      lastA = a;
+      lastB = b;
+      lastC = c;
+    }
+    
+    // Handle run-off mode
+    if (inRunOff) {
+      if (millis() - runOffStartTime >= RUN_OFF_TIME) {
+        // Run-off complete
+        digitalWrite(MOTOR_1, LOW);
+        digitalWrite(MOTOR_2, LOW);
+        inRunOff = false;
+        logEvent(a, b, c, "Run-off complete - Motors OFF");
+        RunTime = RunTime + (millis() - StartTime); 
+        MassFlowTimer = millis() - StartTime;
+        T = 0;
+      } else {
+        // Still in run-off, keep motors running
+        digitalWrite(MOTOR_1, HIGH);
+        digitalWrite(MOTOR_2, HIGH);
+      }
+      delay(100);
+      continue; // Skip normal logic during run-off
+    }
+    
+    // Normal operation logic
+    if (a == LOW && b == LOW) {
+      // Start run-off period
+      if (digitalRead(MOTOR_1) == HIGH) { // Only start if motors were running
+        inRunOff = true;
+        runOffStartTime = millis();
+        logEvent(a, b, c, "Both sensors LOW - Starting run-off");
+      }
+    }
+    else if (c == HIGH) {
+      // Emergency stop - start run-off
+      if (digitalRead(MOTOR_1) == HIGH) {
+        inRunOff = true;
+        runOffStartTime = millis();
+        logEvent(a, b, c, "Sensor 3 HIGH - Starting run-off");
+      }
+    }
+    else {
+      // Normal operation - motors ON
+      digitalWrite(MOTOR_1, HIGH);
+      digitalWrite(MOTOR_2, HIGH);
+    }
+    
     delay(100);
-    return; // Skip normal logic during run-off
   }
-  
-  // Normal operation logic
-  if (a == LOW && b == LOW) {
-    // Start run-off period
-    if (digitalRead(pin4) == HIGH) { // Only start if motor was running
-      inRunOff = true;
-      runOffStartTime = millis();
-      logMotorState("Both sensors LOW - Starting run-off");
-    }
-  }
-  else if (c == HIGH) {
-    // Emergency stop - start run-off
-    if (digitalRead(pin4) == HIGH) {
-      inRunOff = true;
-      runOffStartTime = millis();
-      logMotorState("Sensor 3 HIGH - Starting run-off");
-    }
-  }
-  else {
-    // Normal operation
-    digitalWrite(pin4, HIGH);
-  }
-  
-  delay(100);
-}
-  }
-
-void logSensorChange(int a, int b, int c, String event) {
-  Serial.print(millis());
-  Serial.print(", ");
-  Serial.print(a == HIGH ? "HIGH" : "LOW");
-  Serial.print(", ");
-  Serial.print(b == HIGH ? "HIGH" : "LOW");
-  Serial.print(", ");
-  Serial.print(c == HIGH ? "HIGH" : "LOW");
-  Serial.print(", ");
-  Serial.print(digitalRead(pin4) == HIGH ? "ON" : "OFF");
-  Serial.print(", ");
-  Serial.println(event);
 }
 
-void logMotorState(String message) {
-  Serial.print(millis());
-  Serial.print(", ");
-  Serial.print(lastA == HIGH ? "HIGH" : "LOW");
-  Serial.print(", ");
-  Serial.print(lastB == HIGH ? "HIGH" : "LOW");
-  Serial.print(", ");
-  Serial.print(lastC == HIGH ? "HIGH" : "LOW");
-  Serial.print(", ");
-  Serial.print(digitalRead(pin4) == HIGH ? "ON" : "OFF");
-  Serial.print(", ");
-  Serial.println(message);
+void handleKeypadInput(char key) {
+  int a = digitalRead(SENSOR_1);
+  int b = digitalRead(SENSOR_2);
+  int c = digitalRead(SENSOR_3);
+  
+  switch(key) {
+    case '1':
+      // Emergency GO - Force motors ON
+      currentMode = MANUAL_GO;
+      digitalWrite(MOTOR_1, HIGH);
+      digitalWrite(MOTOR_2, HIGH);
+      inRunOff = false; // Cancel any run-off
+      logEvent(a, b, c, "KEY 1: EMERGENCY GO - Manual Override ON");
+      Serial.println("\n>>> MANUAL MODE: MOTORS ON <<<\n");
+      break;
+      
+    case '2':
+      // Emergency STOP - Force motors OFF
+      currentMode = MANUAL_STOP;
+      digitalWrite(MOTOR_1, LOW);
+      digitalWrite(MOTOR_2, LOW);
+      inRunOff = false; // Cancel any run-off
+      logEvent(a, b, c, "KEY 2: EMERGENCY STOP - Manual Override OFF");
+      Serial.println("\n>>> MANUAL MODE: MOTORS OFF <<<\n");
+      break;
+      
+    case '3':
+      // Return to Automatic Mode
+      currentMode = AUTO_MODE;
+      inRunOff = false; // Reset run-off state
+      logEvent(a, b, c, "KEY 3: Returned to AUTOMATIC MODE");
+      Serial.println("\n>>> AUTOMATIC MODE RESUMED <<<\n");
+      break;
+      
+    default:
+      // Log other key presses but don't act on them
+      Serial.print("Key pressed: ");
+      Serial.println(key);
+      break;
+  }
+}
+
+void logEvent(int a, int b, int c, String event) {
+  // Create CSV line
+  String logLine = String(millis()) + ",";
+  logLine += (a == HIGH ? "HIGH" : "LOW");
+  logLine += ",";
+  logLine += (b == HIGH ? "HIGH" : "LOW");
+  logLine += ",";
+  logLine += (c == HIGH ? "HIGH" : "LOW");
+  logLine += ",";
+  logLine += (digitalRead(MOTOR_1) == HIGH ? "ON" : "OFF");
+  logLine += ",";
+  logLine += (digitalRead(MOTOR_2) == HIGH ? "ON" : "OFF");
+  logLine += ",";
+  
+  // Add mode to log
+  switch(currentMode) {
+    case AUTO_MODE:
+      logLine += "AUTO";
+      break;
+    case MANUAL_GO:
+      logLine += "MANUAL_GO";
+      break;
+    case MANUAL_STOP:
+      logLine += "MANUAL_STOP";
+      break;
+  }
+  
+  logLine += ",";
+  logLine += event;
+  
+  // Print to Serial
+  Serial.println(logLine);
+  
+  // Write to SD card
+  if (sdCardReady) {
+    dataFile = SD.open(currentFileName, FILE_WRITE);
+    if (dataFile) {
+      dataFile.println(logLine);
+      dataFile.close();
+    } else {
+      Serial.println("ERROR: Failed to write to SD card");
+    }
+  }
+}
+
+String getNextFileName() {
+  int fileNumber = 0;
+  String fileName;
+  
+  do {
+    fileName = "LOG_" + String(fileNumber) + ".CSV";
+    fileNumber++;
+  } while (SD.exists(fileName) && fileNumber < 1000);
+  
+  return fileName;
 }
