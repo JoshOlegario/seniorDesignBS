@@ -1,46 +1,86 @@
-"""
-config.py
-Central configuration file for the Raspberry Pi project.
-Store constants, pins, thresholds, and settings here.
-"""
+#include <Keypad.h>
 
-# --- GPIO Pin Assignments ---
-# Sensor Inputs
-SENSOR_1_PIN = 22          # Sensor 1 input
-SENSOR_2_PIN = 24          # Sensor 2 input
-SENSOR_3_PIN = 26          # Sensor 3 input
+// ========== PIN ASSIGNMENTS FOR MEGA 2560 ==========
+// Motor (single MOSFET controlling both motors)
+const int MOTOR_CONTROL = 30;
 
-# Motor Control (Brushless ESC)
-MOTOR_ESC_PIN = 4          # ESC signal pin (PWM capable)
+// Keypad Matrix - wired to pins 52 down to 46 (7 pins total)
+byte rowPins[4] = {52, 51, 50, 49};    // Keypad pins 1-4 (Rows)
+byte colPins[3] = {48, 47, 46};        // Keypad pins 5-7 (Columns)
+// ==================================================
 
-# Safety
-EMERGENCY_STOP_PIN = 17    # GPIO pin for e-stop (active LOW)
-MANUAL_RESTART_PIN = 27    # GPIO pin for manual restart button
+// Keypad layout
+const byte ROWS = 4;
+const byte COLS = 3;
+char keys[ROWS][COLS] = {
+  {'1','2','3'},
+  {'4','5','6'},
+  {'7','8','9'},
+  {'*','0','#'}
+};
 
-# --- Safety Settings ---
-ESTOP_ACTIVE_STATE = False     # E-stop is active when LOW (button pressed)
-ESTOP_DEBOUNCE_TIME = 0.02     # E-stop debounce time in seconds
-RESTART_BUTTON_DEBOUNCE = 0.1  # Restart button debounce time in seconds
+Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 
-# --- Brushless Motor Settings (ESC Control) ---
-ESC_FREQUENCY = 50         # ESC PWM frequency in Hz
-ESC_MIN_PULSE = 1.0        # Minimum pulse width in ms (motor stopped)
-ESC_MAX_PULSE = 2.0        # Maximum pulse width in ms (full throttle)
-ESC_ARM_PULSE = 1.0        # ESC arming pulse width in ms
-ESC_ARM_TIME = 2.0         # Time to wait for ESC to arm (seconds)
+void setup() {
+  // Set up motor control pin (MOSFET gate)
+  pinMode(MOTOR_CONTROL, OUTPUT);
+  
+  // Initialize motor to OFF
+  digitalWrite(MOTOR_CONTROL, LOW);
+  
+  Serial.begin(115200);
+  Serial.println("=== Manual Motor Control - Mega 2560 ===");
+  Serial.println("Keypad: Pins 52-46");
+  Serial.println("Motor Control: Pin 30 (Single MOSFET)");
+  Serial.println("\nPress 1 = Motors ON");
+  Serial.println("Press 2 = Motors OFF");
+  Serial.println("========================================\n");
+}
 
-# Motor speed settings (duty cycle 0.0-1.0)
-MOTOR_IDLE_SPEED = 0.0     # Motor stopped
-MOTOR_RUN_SPEED = 0.6      # Normal operating speed
-MOTOR_MAX_SPEED = 1.0      # Maximum speed
+void loop() {
+  // Check for keypad input
+  char key = keypad.getKey();
+  
+  if (key) {
+    handleKeypadInput(key);
+  }
+  
+  delay(100);
+}
 
-# --- Proximity Sensor Settings ---
-PROX_THRESHOLD = 0.5       # Threshold for material detection
-SENSOR_DEBOUNCE_TIME = 0.05  # Sensor debounce time in seconds
+void handleKeypadInput(char key) {
+  switch(key) {
+    case '1':
+      // Motors ON
+      digitalWrite(MOTOR_CONTROL, HIGH);
+      Serial.println(">>> MOTORS ON <<<");
+      break;
+      
+    case '2':
+      // Motors OFF
+      digitalWrite(MOTOR_CONTROL, LOW);
+      Serial.println(">>> MOTORS OFF <<<");
+      break;
+      
+    default:
+      // Other keys - no action
+      Serial.print("Key pressed: ");
+      Serial.println(key);
+      break;
+  }
+}
+```
 
-# --- Logger Settings ---
-LOG_FILE = "logs.txt"      # Default log file path
-LOG_LEVEL = "INFO"         # Logging level: DEBUG, INFO, WARNING, ERROR
+## Your Wiring:
+```
+Keypad Pin → Arduino Mega Pin
+──────────────────────────────
+Pin 1 (R1) → 52
+Pin 2 (R2) → 51
+Pin 3 (R3) → 50
+Pin 4 (R4) → 49
+Pin 5 (C1) → 48
+Pin 6 (C2) → 47
+Pin 7 (C3) → 46
 
-# --- System Settings ---
-LOOP_DELAY = 0.1          # Main loop delay in seconds (100ms)
+MOSFET Gate → Pin 30 (controls both motors)
